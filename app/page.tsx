@@ -236,6 +236,21 @@ button{cursor:pointer}
 .cp .modalFooter{display:flex;justify-content:space-between;gap:8px;padding:18px 22px;border-top:1px solid var(--border)}
 .cp .dangerBtn{border:1px solid #F2CACA;color:var(--red);background:var(--red-soft);border-radius:9px;padding:8px 12px}
 .cp .secondaryBtn{border:1px solid var(--border);color:var(--text);background:#fff;border-radius:9px;padding:8px 14px}
+.cp .financeSummary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}
+.cp .financeCard{background:linear-gradient(145deg,#fff,#F8FBFD);border:1px solid var(--border);border-radius:15px;padding:17px;box-shadow:var(--shadow)}
+.cp .financeCard span{display:block;color:var(--muted);font-size:11px}
+.cp .financeCard b{display:block;margin-top:8px;font-size:22px;color:var(--primary)}
+.cp .goalGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:15px}
+.cp .goalCard{border:1px solid var(--border);border-radius:15px;padding:16px;background:#fff}
+.cp .goalCardHead{display:flex;align-items:center;gap:9px;font-weight:800}
+.cp .goalDot{width:10px;height:10px;border-radius:50%;background:var(--blue);box-shadow:0 0 0 4px var(--blue-soft)}
+.cp .goalCardValue{font-size:20px;font-weight:800;margin-top:12px;color:var(--primary)}
+.cp .goalCard small{display:block;color:var(--muted);margin-top:4px}
+.cp .tableScroll{overflow-x:auto}
+.cp .allocationForm{display:grid;grid-template-columns:1.3fr 1.3fr 1fr auto;gap:9px;align-items:center}
+.cp .sectionIntro{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.cp .sectionIntro h2{margin:0}
+.cp .reportMetric{font-size:18px!important}
 .cp .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:200;background:#17212B;color:#fff;padding:12px 20px;border-radius:99px;box-shadow:0 15px 40px rgba(0,0,0,.2);font-size:12px;font-weight:700}
 .cp .toast.error{background:var(--red)}
 @keyframes fade{from{opacity:0}}
@@ -298,6 +313,8 @@ button{cursor:pointer}
 .cp .tabs button{flex:1}
 .cp .topActions .primaryBtn{display:none}
 .cp .repairHeader,.cp .repairRow{grid-template-columns:1fr 105px}
+.cp .financeSummary{grid-template-columns:1fr}
+.cp .allocationForm{grid-template-columns:1fr}
 }
 @media(hover:none){
 .cp .carRow:hover,.cp .statusTab:hover,.cp .primaryBtn:hover,.cp .statusAction:hover{transform:none}
@@ -344,7 +361,7 @@ export default function CarProfitDashboard() {
   const [editExpenseAmount, setEditExpenseAmount] = useState('');
   const [editPrice, setEditPrice] = useState('');
   const [goals, setGoals] = useState<{ id: string; name: string }[]>([]);
-  const [allocations, setAllocations] = useState<{ id: string; car_id: string; goal_id: string; amount: number }[]>([]);
+  const [allocations, setAllocations] = useState<{ id: string; car_id: string; goal_id: string; amount: number; created_at?: string }[]>([]);
   const [goalName, setGoalName] = useState('');
   const [allocationCarId, setAllocationCarId] = useState('');
   const [allocationGoalId, setAllocationGoalId] = useState('');
@@ -384,14 +401,14 @@ export default function CarProfitDashboard() {
   const fetchProfitPlans = async () => {
     const [{ data: goalRows, error: goalsError }, { data: allocationRows, error: allocationsError }] = await Promise.all([
       supabase.from('profit_goals').select('id,name').order('created_at', { ascending: true }),
-      supabase.from('profit_allocations').select('id,car_id,goal_id,amount').order('created_at', { ascending: true }),
+      supabase.from('profit_allocations').select('id,car_id,goal_id,amount,created_at').order('created_at', { ascending: false }),
     ]);
     if (goalsError || allocationsError) {
       say('تعذر تحميل أهداف توزيع الأرباح. تأكد من تطبيق ملف إعداد قاعدة البيانات.', true);
       return;
     }
     setGoals((goalRows || []) as { id: string; name: string }[]);
-    setAllocations((allocationRows || []) as { id: string; car_id: string; goal_id: string; amount: number }[]);
+    setAllocations((allocationRows || []) as { id: string; car_id: string; goal_id: string; amount: number; created_at?: string }[]);
   };
 
   useEffect(() => {
@@ -481,6 +498,14 @@ export default function CarProfitDashboard() {
     setAllocationAmount('');
     await fetchProfitPlans();
     say('تم تسجيل توزيع المبلغ');
+  };
+
+  const deleteAllocation = async (allocationId: string) => {
+    if (!window.confirm('حذف هذا التوزيع من السجل؟')) return;
+    const { error } = await supabase.from('profit_allocations').delete().eq('id', allocationId);
+    if (error) return say(`تعذر حذف التوزيع: ${error.message}`, true);
+    await fetchProfitPlans();
+    say('تم حذف التوزيع وتحديث الرصيد');
   };
 
   const addRepair = async (e: FormEvent) => {
@@ -730,26 +755,33 @@ export default function CarProfitDashboard() {
             </>}
 
             {activeSection === 'allocations' && <section className="card" style={{ padding: 22, marginBottom: 20 }}>
-              <h2 className="cardTitle">توزيع صافي الأرباح على الأهداف</h2>
-              <p className="cardSub">المتاح للتوزيع من أرباح السيارات المباعة: <b>{fmt(unallocatedProfit)} ر.ع</b></p>
+              <div className="sectionIntro"><div><h2 className="cardTitle">توزيع صافي الأرباح</h2><div className="cardSub">خصص أرباح كل سيارة لأهدافكم، مثل بناء المنزل أو الفواتير أو التقسيم بينكم.</div></div><span className="status ready">من السيارات المباعة فقط</span></div>
+              <div className="financeSummary">
+                <div className="financeCard"><span>صافي الأرباح القابلة للتوزيع</span><b className="num">{fmt(totalNetProfit)} ر.ع</b></div>
+                <div className="financeCard"><span>تم تخصيصه للأهداف</span><b className="num">{fmt(totalAllocated)} ر.ع</b></div>
+                <div className="financeCard"><span>متبقي للتوزيع</span><b className="num">{fmt(unallocatedProfit)} ر.ع</b></div>
+              </div>
               <form onSubmit={addGoal} style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-                <input className="search" value={goalName} onChange={(e) => setGoalName(e.target.value)} placeholder="اسم هدف جديد، مثل بناء المنزل أو الفواتير" />
-                <button className="primaryBtn" type="submit">إضافة هدف</button>
+                <input className="search" value={goalName} onChange={(e) => setGoalName(e.target.value)} placeholder="أضف هدفًا: بناء المنزل، الفواتير، أو اسم شخص" />
+                <button className="primaryBtn" type="submit">＋ إضافة هدف</button>
               </form>
-              {goals.length === 0 ? <div className="empty" style={{ marginTop: 14 }}>أضف هدفًا للبدء بتوزيع الأرباح.</div> : <div className="stats" style={{ marginTop: 16 }}>
-                {allocatedByGoal.map((goal) => <div className="statCard" key={goal.id}><div className="statLabel">{goal.name}</div><div className="statValue num">{fmt(goal.amount)} ر.ع</div></div>)}
+              {goals.length === 0 ? <div className="empty" style={{ marginTop: 14 }}>أضف هدفًا للبدء بتوزيع الأرباح.</div> : <div className="goalGrid">
+                {allocatedByGoal.map((goal) => <div className="goalCard" key={goal.id}><div className="goalCardHead"><span className="goalDot" />{goal.name}</div><div className="goalCardValue num">{fmt(goal.amount)} ر.ع</div><small>إجمالي ما تم تخصيصه لهذا الهدف</small></div>)}
               </div>}
-              <form onSubmit={addAllocation} className="card" style={{ padding: 16, marginTop: 16, display: 'grid', gap: 10 }}>
-                <h3 className="cardTitle">تسجيل توزيع من سيارة مباعة</h3>
-                <select className="search" value={allocationCarId} onChange={(e) => setAllocationCarId(e.target.value)}>
-                  <option value="">اختر السيارة</option>
-                  {stats.sold.map((car) => { const net = Number(car.selling_price || 0) - Number(car.purchase_price || 0) - sum(car.expenses); const used = allocations.filter((item) => item.car_id === String(car.id)).reduce((n, item) => n + Number(item.amount), 0); return <option key={car.id} value={String(car.id)}>{car.title} — متاح {fmt(Math.max(0, net - used))} ر.ع</option>; })}
-                </select>
-                <select className="search" value={allocationGoalId} onChange={(e) => setAllocationGoalId(e.target.value)}><option value="">اختر الهدف أو الاستخدام</option>{goals.map((goal) => <option key={goal.id} value={goal.id}>{goal.name}</option>)}</select>
-                <input className="search" type="number" min="0.001" step="0.001" value={allocationAmount} onChange={(e) => setAllocationAmount(e.target.value)} placeholder="المبلغ بالريال العماني" />
-                <button className="primaryBtn" type="submit">حفظ التوزيع</button>
+              <form onSubmit={addAllocation} className="card" style={{ padding: 16, marginTop: 18 }}>
+                <h3 className="cardTitle" style={{ marginBottom: 12 }}>تسجيل توزيع جديد</h3>
+                <div className="allocationForm">
+                  <select className="search" value={allocationCarId} onChange={(e) => setAllocationCarId(e.target.value)}>
+                    <option value="">اختر السيارة المباعة</option>
+                    {stats.sold.map((car) => { const net = Number(car.selling_price || 0) - Number(car.purchase_price || 0) - sum(car.expenses); const used = allocations.filter((item) => item.car_id === String(car.id)).reduce((n, item) => n + Number(item.amount), 0); return <option key={car.id} value={String(car.id)}>{car.title} — متاح {fmt(Math.max(0, net - used))} ر.ع</option>; })}
+                  </select>
+                  <select className="search" value={allocationGoalId} onChange={(e) => setAllocationGoalId(e.target.value)}><option value="">اختر الهدف أو الاستخدام</option>{goals.map((goal) => <option key={goal.id} value={goal.id}>{goal.name}</option>)}</select>
+                  <input className="search" type="number" min="0.001" step="0.001" value={allocationAmount} onChange={(e) => setAllocationAmount(e.target.value)} placeholder="المبلغ (ر.ع)" />
+                  <button className="primaryBtn" type="submit">حفظ التوزيع</button>
+                </div>
               </form>
-              <div className="repairTotal num" style={{ marginTop: 14 }}><span>إجمالي الموزع: {fmt(totalAllocated)} ر.ع</span><b>غير موزع: {fmt(unallocatedProfit)} ر.ع</b></div>
+              <h3 className="sectionTitle">سجل التوزيعات</h3>
+              {allocations.length === 0 ? <div className="empty">ستظهر هنا التوزيعات المسجلة.</div> : <div className="tableScroll"><div className="repairTable"><div className="repairHeader" style={{ gridTemplateColumns: '1fr 1fr 130px 120px auto' }}><span>السيارة</span><span>الهدف</span><span>المبلغ</span><span>التاريخ</span><span /></div>{allocations.map((entry) => <div className="repairRow num" key={entry.id} style={{ gridTemplateColumns: '1fr 1fr 130px 120px auto' }}><span>{cars.find((car) => String(car.id) === entry.car_id)?.title || 'سيارة غير موجودة'}</span><span>{goals.find((goal) => goal.id === entry.goal_id)?.name || 'هدف محذوف'}</span><b>{fmt(entry.amount)} ر.ع</b><span>{entry.created_at ? new Date(entry.created_at).toLocaleDateString('ar-OM') : '—'}</span><button className="dangerBtn" onClick={() => deleteAllocation(entry.id)}>حذف</button></div>)}</div></div>}
             </section>}
 
             {activeSection === 'reports' && <section className="card" style={{ padding: 22, marginBottom: 20 }}>
