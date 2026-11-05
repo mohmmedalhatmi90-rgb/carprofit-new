@@ -27,6 +27,9 @@ type Car = {
   buyer_name?: string | null;
   status?: string | null;
   created_at?: string;
+  arrival_date?: string | null;
+  current_location?: string | null;
+  tracking_url?: string | null;
   expenses?: Expense[];
 };
 type Meta = { label: string; icon: string; color: string; next: Status | null; nextLabel: string | null };
@@ -51,6 +54,8 @@ const TITLES: Record<string, [string, string]> = {
   cars: ['جميع السيارات', 'إدارة ومتابعة جميع السيارات المسجلة'],
   status: ['حالة السيارات', 'تابع مراحل كل سيارة من الشراء حتى البيع'],
   add: ['إضافة سيارة', 'أضف سيارة جديدة إلى النظام'],
+  allocations: ['توزيع الأرباح', 'وزع صافي أرباح السيارات على أهدافكم واستخداماتكم'],
+  reports: ['التقارير', 'ملخص السيارات والمبيعات والمصاريف والأرباح'],
 };
 
 function useCountUp(target: number, ms = 900) {
@@ -212,7 +217,7 @@ button{cursor:pointer}
 .cp .repairForm input,.cp .saleForm input{width:100%;border:1px solid var(--border);background:#F8FAFC;border-radius:10px;padding:10px}
 .cp .smallBtn{border:0;background:var(--orange);color:#fff;border-radius:10px;padding:0 16px;font-weight:700}
 .cp .repairTable{margin-top:12px;border:1px solid var(--border);border-radius:13px;overflow:hidden}
-.cp .repairHeader,.cp .repairRow{display:grid;grid-template-columns:1fr 130px;gap:10px;align-items:center;padding:12px 14px}
+.cp .repairHeader,.cp .repairRow{display:grid;grid-template-columns:1fr 110px auto;gap:10px;align-items:center;padding:12px 14px}
 .cp .repairHeader{background:#F7F9FC;color:var(--muted);font-size:10px;font-weight:700;border-bottom:1px solid var(--border)}
 .cp .repairRow{font-size:11px;border-bottom:1px dashed #DCE3EA}
 .cp .repairRow:last-child{border-bottom:0}
@@ -322,6 +327,9 @@ export default function CarProfitDashboard() {
   const [title, setTitle] = useState('');
   const [chassis, setChassis] = useState('');
   const [price, setPrice] = useState('');
+  const [arrivalDate, setArrivalDate] = useState('');
+  const [currentLocation, setCurrentLocation] = useState('');
+  const [trackingUrl, setTrackingUrl] = useState('');
   const [sel, setSel] = useState<Car | null>(null);
   const [repairTitle, setRepairTitle] = useState('');
   const [repairAmount, setRepairAmount] = useState('');
@@ -331,6 +339,16 @@ export default function CarProfitDashboard() {
   const [toast, setToast] = useState<{ message: string; error: boolean; id: number } | null>(null);
   const [activeSection, setActiveSection] = useState('dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<string | number | null>(null);
+  const [editExpenseTitle, setEditExpenseTitle] = useState('');
+  const [editExpenseAmount, setEditExpenseAmount] = useState('');
+  const [editPrice, setEditPrice] = useState('');
+  const [goals, setGoals] = useState<{ id: string; name: string }[]>([]);
+  const [allocations, setAllocations] = useState<{ id: string; car_id: string; goal_id: string; amount: number }[]>([]);
+  const [goalName, setGoalName] = useState('');
+  const [allocationCarId, setAllocationCarId] = useState('');
+  const [allocationGoalId, setAllocationGoalId] = useState('');
+  const [allocationAmount, setAllocationAmount] = useState('');
 
   const say = (message: string, error = false) => {
     setToast({ message, error, id: Date.now() });
@@ -363,9 +381,27 @@ export default function CarProfitDashboard() {
     setLoading(false);
   };
 
+  const fetchProfitPlans = async () => {
+    const [{ data: goalRows, error: goalsError }, { data: allocationRows, error: allocationsError }] = await Promise.all([
+      supabase.from('profit_goals').select('id,name').order('created_at', { ascending: true }),
+      supabase.from('profit_allocations').select('id,car_id,goal_id,amount').order('created_at', { ascending: true }),
+    ]);
+    if (goalsError || allocationsError) {
+      say('تعذر تحميل أهداف توزيع الأرباح. تأكد من تطبيق ملف إعداد قاعدة البيانات.', true);
+      return;
+    }
+    setGoals((goalRows || []) as { id: string; name: string }[]);
+    setAllocations((allocationRows || []) as { id: string; car_id: string; goal_id: string; amount: number }[]);
+  };
+
   useEffect(() => {
     fetchCars();
+    fetchProfitPlans();
   }, []);
+
+  useEffect(() => {
+    setEditPrice(sel ? String(sel.purchase_price) : '');
+  }, [sel?.id, sel?.purchase_price]);
 
   const addCar = async (e: FormEvent) => {
     e.preventDefault();
@@ -374,15 +410,77 @@ export default function CarProfitDashboard() {
     if (Number.isNaN(parsedPrice) || parsedPrice <= 0) return say('أدخل سعر سيارة صحيح بالريال العُماني', true);
 
     const { error } = await supabase.from('cars').insert([
-      { title: title.trim(), chassis_number: chassis.trim(), purchase_price: parsedPrice, status: 'available' },
+      { title: title.trim(), chassis_number: chassis.trim(), purchase_price: parsedPrice, status: 'available', arrival_date: arrivalDate || null, current_location: currentLocation.trim() || null, tracking_url: trackingUrl.trim() || null },
     ]);
     if (error) return say(`حدث خطأ: ${error.message}`, true);
 
     setTitle('');
     setChassis('');
     setPrice('');
+    setArrivalDate('');
+    setCurrentLocation('');
+    setTrackingUrl('');
     await fetchCars();
     say('تمت إضافة السيارة بنجاح');
+  };
+
+  const updateExpense = async (expense: Expense) => {
+    const amount = Number(editExpenseAmount);
+    if (!editExpenseTitle.trim() || !Number.isFinite(amount) || amount <= 0) return say('أدخل اسمًا وقيمة صحيحة للمصروف', true);
+    const { error } = await supabase.from('expenses').update({ title: editExpenseTitle.trim(), amount }).eq('id', expense.id);
+    if (error) return say(`تعذر تعديل الغرض: ${error.message}`, true);
+    setEditingExpense(null);
+    await fetchCars();
+    say('تم تعديل غرض التصليح');
+  };
+
+  const deleteExpense = async (expense: Expense) => {
+    if (!window.confirm(`حذف «${expense.title}»؟`)) return;
+    const { error } = await supabase.from('expenses').delete().eq('id', expense.id);
+    if (error) return say(`تعذر حذف الغرض: ${error.message}`, true);
+    await fetchCars();
+    say('تم حذف غرض التصليح');
+  };
+
+  const updateCarPrice = async () => {
+    if (!sel) return;
+    const amount = Number(editPrice);
+    if (!Number.isFinite(amount) || amount <= 0) return say('أدخل سعرًا صحيحًا أكبر من صفر', true);
+    const { error } = await supabase.from('cars').update({ purchase_price: amount }).eq('id', sel.id);
+    if (error) return say(`تعذر تعديل السعر: ${error.message}`, true);
+    await fetchCars();
+    say('تم تعديل سعر شراء السيارة');
+  };
+
+  const saveCarShipping = async (car: Car, values: { arrival_date: string | null; current_location: string | null; tracking_url: string | null }) => {
+    const { error } = await supabase.from('cars').update(values).eq('id', car.id);
+    if (error) return say(`تعذر حفظ بيانات الوصول والتتبع: ${error.message}`, true);
+    await fetchCars();
+    say('تم حفظ بيانات الوصول والتتبع');
+  };
+
+  const addGoal = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!goalName.trim()) return say('اكتب اسم الهدف', true);
+    const { error } = await supabase.from('profit_goals').insert([{ name: goalName.trim() }]);
+    if (error) return say(`تعذر إضافة الهدف: ${error.message}`, true);
+    setGoalName('');
+    await fetchProfitPlans();
+  };
+
+  const addAllocation = async (e: FormEvent) => {
+    e.preventDefault();
+    const car = cars.find((item) => String(item.id) === allocationCarId);
+    const amount = Number(allocationAmount);
+    if (!car || !allocationGoalId || !Number.isFinite(amount) || amount <= 0) return say('اختر سيارة وهدفًا وأدخل مبلغًا صحيحًا', true);
+    const netProfit = Number(car.selling_price || 0) - Number(car.purchase_price || 0) - sum(car.expenses);
+    const alreadyAllocated = allocations.filter((item) => item.car_id === String(car.id)).reduce((total, item) => total + Number(item.amount), 0);
+    if (amount > Math.max(0, netProfit - alreadyAllocated)) return say('المبلغ يتجاوز صافي الربح المتبقي لهذه السيارة', true);
+    const { error } = await supabase.from('profit_allocations').insert([{ car_id: String(car.id), goal_id: allocationGoalId, amount }]);
+    if (error) return say(`تعذر تسجيل التوزيع: ${error.message}`, true);
+    setAllocationAmount('');
+    await fetchProfitPlans();
+    say('تم تسجيل توزيع المبلغ');
   };
 
   const addRepair = async (e: FormEvent) => {
@@ -489,6 +587,13 @@ export default function CarProfitDashboard() {
   const selectedCost = sel ? Number(sel.purchase_price || 0) + selectedExpenses : 0;
   const expectedProfit = sel && sellingPrice ? parseFloat(sellingPrice) - selectedCost : 0;
   const currentStatusIndex = sel ? STATUS_ORDER.indexOf(selStatus) : -1;
+  const allocatedByGoal = goals.map((goal) => ({
+    ...goal,
+    amount: allocations.filter((item) => item.goal_id === goal.id).reduce((total, item) => total + Number(item.amount), 0),
+  }));
+  const totalAllocated = allocations.reduce((total, item) => total + Number(item.amount), 0);
+  const totalNetProfit = stats.sold.reduce((total, car) => total + Math.max(0, Number(car.selling_price || 0) - Number(car.purchase_price || 0) - sum(car.expenses)), 0);
+  const unallocatedProfit = Math.max(0, totalNetProfit - totalAllocated);
 
   const [pageTitle, pageSub] = TITLES[activeSection] || TITLES.dashboard;
 
@@ -512,6 +617,12 @@ export default function CarProfitDashboard() {
     ['إجمالي التصليح', `${fmt(stats.expenses)} ر.ع`],
     ['العائد على الاستثمار', `${stats.roi}%`],
   ];
+
+  const reportRows = stats.sold.map((car) => ({
+    car,
+    cost: Number(car.purchase_price || 0) + sum(car.expenses),
+    profit: Number(car.selling_price || 0) - Number(car.purchase_price || 0) - sum(car.expenses),
+  }));
 
   return (
     <div className="cp">
@@ -552,9 +663,9 @@ export default function CarProfitDashboard() {
           {nav('add', '＋', 'إضافة سيارة', goAdd)}
 
           <div className="navTitle">الإدارة المالية</div>
-          {nav(null, '💰', 'الأرباح والمبيعات', () => say('قسم الأرباح والمبيعات قيد التطوير'))}
+          {nav('allocations', '💰', 'توزيع الأرباح', () => setActiveSection('allocations'))}
           {nav(null, '🧾', 'المصاريف', () => say('قسم المصاريف قيد التطوير'))}
-          {nav(null, '📈', 'التقارير', () => say('قسم التقارير قيد التطوير'))}
+          {nav('reports', '📈', 'التقارير', () => setActiveSection('reports'))}
 
           <div className="sidebarBottom">
             <div className="userBox">
@@ -581,6 +692,7 @@ export default function CarProfitDashboard() {
               </div>
             </header>
 
+            {activeSection === 'dashboard' && <>
             <section className="hero">
               <div className="heroGrid">
                 <div>
@@ -615,8 +727,44 @@ export default function CarProfitDashboard() {
                 </div>
               ))}
             </section>
+            </>}
 
-            <div className="workspace">
+            {activeSection === 'allocations' && <section className="card" style={{ padding: 22, marginBottom: 20 }}>
+              <h2 className="cardTitle">توزيع صافي الأرباح على الأهداف</h2>
+              <p className="cardSub">المتاح للتوزيع من أرباح السيارات المباعة: <b>{fmt(unallocatedProfit)} ر.ع</b></p>
+              <form onSubmit={addGoal} style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                <input className="search" value={goalName} onChange={(e) => setGoalName(e.target.value)} placeholder="اسم هدف جديد، مثل بناء المنزل أو الفواتير" />
+                <button className="primaryBtn" type="submit">إضافة هدف</button>
+              </form>
+              {goals.length === 0 ? <div className="empty" style={{ marginTop: 14 }}>أضف هدفًا للبدء بتوزيع الأرباح.</div> : <div className="stats" style={{ marginTop: 16 }}>
+                {allocatedByGoal.map((goal) => <div className="statCard" key={goal.id}><div className="statLabel">{goal.name}</div><div className="statValue num">{fmt(goal.amount)} ر.ع</div></div>)}
+              </div>}
+              <form onSubmit={addAllocation} className="card" style={{ padding: 16, marginTop: 16, display: 'grid', gap: 10 }}>
+                <h3 className="cardTitle">تسجيل توزيع من سيارة مباعة</h3>
+                <select className="search" value={allocationCarId} onChange={(e) => setAllocationCarId(e.target.value)}>
+                  <option value="">اختر السيارة</option>
+                  {stats.sold.map((car) => { const net = Number(car.selling_price || 0) - Number(car.purchase_price || 0) - sum(car.expenses); const used = allocations.filter((item) => item.car_id === String(car.id)).reduce((n, item) => n + Number(item.amount), 0); return <option key={car.id} value={String(car.id)}>{car.title} — متاح {fmt(Math.max(0, net - used))} ر.ع</option>; })}
+                </select>
+                <select className="search" value={allocationGoalId} onChange={(e) => setAllocationGoalId(e.target.value)}><option value="">اختر الهدف أو الاستخدام</option>{goals.map((goal) => <option key={goal.id} value={goal.id}>{goal.name}</option>)}</select>
+                <input className="search" type="number" min="0.001" step="0.001" value={allocationAmount} onChange={(e) => setAllocationAmount(e.target.value)} placeholder="المبلغ بالريال العماني" />
+                <button className="primaryBtn" type="submit">حفظ التوزيع</button>
+              </form>
+              <div className="repairTotal num" style={{ marginTop: 14 }}><span>إجمالي الموزع: {fmt(totalAllocated)} ر.ع</span><b>غير موزع: {fmt(unallocatedProfit)} ر.ع</b></div>
+            </section>}
+
+            {activeSection === 'reports' && <section className="card" style={{ padding: 22, marginBottom: 20 }}>
+              <h2 className="cardTitle">تقرير السيارات والمبيعات</h2>
+              <div className="stats" style={{ marginTop: 16 }}>
+                {[
+                  ['عدد السيارات', cars.length], ['المباعة', stats.sold.length], ['إجمالي المبيعات', `${fmt(stats.sales)} ر.ع`],
+                  ['إجمالي المصاريف', `${fmt(stats.expenses)} ر.ع`], ['صافي الربح المحقق', `${fmt(stats.profit)} ر.ع`], ['رأس المال المسجل', `${fmt(stats.capital)} ر.ع`],
+                ].map(([label, value]) => <div className="statCard" key={String(label)}><div className="statLabel">{label}</div><div className="statValue num">{value}</div></div>)}
+              </div>
+              <h3 className="sectionTitle">تفاصيل السيارات المباعة</h3>
+              {reportRows.length === 0 ? <div className="empty">لا توجد مبيعات مسجلة بعد.</div> : <div className="repairTable"><div className="repairHeader" style={{ gridTemplateColumns: '1fr 110px 110px 110px' }}><span>السيارة</span><span>سعر الشراء</span><span>سعر البيع</span><span>صافي الربح</span></div>{reportRows.map(({ car, cost, profit }) => <div className="repairRow num" key={car.id} style={{ gridTemplateColumns: '1fr 110px 110px 110px' }}><span>{car.title}<small style={{ display: 'block', color: 'var(--muted)' }}>تكلفة شاملة {fmt(cost)} ر.ع</small></span><span>{fmt(car.purchase_price)}</span><span>{fmt(car.selling_price)} ر.ع</span><b style={{ color: profit >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmt(profit)} ر.ع</b></div>)}</div>}
+            </section>}
+
+            {['dashboard', 'cars', 'status', 'add'].includes(activeSection) && <div className="workspace">
               <aside className="card addCard" id="add-car-form">
                 <h2 className="cardTitle">إضافة سيارة جديدة</h2>
                 <div className="cardSub">أضف السيارة لتبدأ متابعة تكلفتها وربحها</div>
@@ -641,6 +789,9 @@ export default function CarProfitDashboard() {
                       placeholder="0.000 ر.ع"
                     />
                   </div>
+                  <div className="field"><label>تاريخ الوصول (اختياري)</label><input type="date" value={arrivalDate} onChange={(e) => setArrivalDate(e.target.value)} /></div>
+                  <div className="field"><label>الموقع الحالي أو آخر محطة</label><input value={currentLocation} onChange={(e) => setCurrentLocation(e.target.value)} placeholder="مثال: ميناء صحار" /></div>
+                  <div className="field"><label>رابط تتبع الشحنة</label><input type="url" value={trackingUrl} onChange={(e) => setTrackingUrl(e.target.value)} placeholder="https://..." /></div>
                   <button className="addSubmit" type="submit">إضافة السيارة</button>
                 </form>
               </aside>
@@ -782,7 +933,7 @@ export default function CarProfitDashboard() {
                   })
                 )}
               </section>
-            </div>
+            </div>}
           </div>
         </main>
       </div>
@@ -807,7 +958,11 @@ export default function CarProfitDashboard() {
               <div className="detailGrid">
                 <div className="detailBox">
                   <span>سعر السيارة</span>
-                  <b className="num">{fmt(sel.purchase_price)} ر.ع</b>
+                  <form onSubmit={(e) => { e.preventDefault(); updateCarPrice(); }} style={{ display: 'flex', gap: 6 }}>
+                    <input aria-label="سعر الشراء" type="number" min="0.001" step="0.001" value={editPrice} onChange={(e) => setEditPrice(e.target.value)} />
+                    <button className="secondaryBtn" type="submit">حفظ</button>
+                  </form>
+                  <small className="num">السعر الحالي: {fmt(sel.purchase_price)} ر.ع</small>
                 </div>
                 <div className="detailBox">
                   <span>إجمالي التصليح</span>
@@ -855,6 +1010,20 @@ export default function CarProfitDashboard() {
                 )}
               </div>
 
+              <h3 className="sectionTitle">الوصول والتتبع</h3>
+              <form className="card" style={{ padding: 14, display: 'grid', gap: 9 }} onSubmit={(e) => {
+                e.preventDefault();
+                const data = new FormData(e.currentTarget);
+                const date = String(data.get('arrival_date') || '');
+                void saveCarShipping(sel, { arrival_date: date || null, current_location: String(data.get('current_location') || '').trim() || null, tracking_url: String(data.get('tracking_url') || '').trim() || null });
+              }}>
+                <label>تاريخ الوصول<input name="arrival_date" type="date" defaultValue={sel.arrival_date || ''} /></label>
+                <label>الموقع الحالي / آخر محطة<input name="current_location" defaultValue={sel.current_location || ''} placeholder="مثال: ميناء صحار" /></label>
+                <label>رابط تتبع الشحنة<input name="tracking_url" type="url" defaultValue={sel.tracking_url || ''} placeholder="https://..." /></label>
+                {sel.tracking_url && <a href={sel.tracking_url} target="_blank" rel="noreferrer">فتح رابط التتبع ↗</a>}
+                <button className="secondaryBtn" type="submit">حفظ بيانات الوصول</button>
+              </form>
+
               <h3 className="sectionTitle">أغراض التصليح</h3>
 
               <form className="repairForm" onSubmit={addRepair}>
@@ -881,8 +1050,15 @@ export default function CarProfitDashboard() {
                   </div>
                   {(sel.expenses || []).map((repair) => (
                     <div className="repairRow num" key={repair.id}>
-                      <span className="repairName">{repair.title}</span>
-                      <span className="repairAmount">{fmt(repair.amount)} ر.ع</span>
+                      {editingExpense === repair.id ? <>
+                        <input value={editExpenseTitle} onChange={(e) => setEditExpenseTitle(e.target.value)} aria-label="اسم غرض التصليح" />
+                        <input type="number" min="0.001" step="0.001" value={editExpenseAmount} onChange={(e) => setEditExpenseAmount(e.target.value)} aria-label="قيمة غرض التصليح" />
+                        <span style={{ display: 'flex', gap: 5 }}><button className="secondaryBtn" onClick={() => updateExpense(repair)}>حفظ</button><button className="secondaryBtn" onClick={() => setEditingExpense(null)}>إلغاء</button></span>
+                      </> : <>
+                        <span className="repairName">{repair.title}</span>
+                        <span className="repairAmount">{fmt(repair.amount)} ر.ع</span>
+                        <span style={{ display: 'flex', gap: 5 }}><button className="secondaryBtn" onClick={() => { setEditingExpense(repair.id); setEditExpenseTitle(repair.title); setEditExpenseAmount(String(repair.amount)); }}>تعديل</button><button className="dangerBtn" onClick={() => deleteExpense(repair)}>حذف</button></span>
+                      </>}
                     </div>
                   ))}
                 </div>
