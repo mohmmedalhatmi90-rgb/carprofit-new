@@ -29,6 +29,8 @@ type Car = {
   sale_date?: string | null;
   arrival_date?: string | null;
   tracking_url?: string | null;
+  shipping_cost?: number | string | null;
+  paid_amount?: number | string | null;
   expenses?: Expense[];
 };
 type Goal = { id: string; name: string };
@@ -74,7 +76,13 @@ function Icon({ n, size = 18 }: { n: string; size?: number }) {
 const fmt = (n?: number | string | null) =>
   Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
 const sum = (arr?: Expense[]) => (arr || []).reduce((a, e) => a + Number(e.amount || 0), 0);
-const netOf = (c: Car) => Number(c.selling_price || 0) - Number(c.purchase_price || 0) - sum(c.expenses);
+/* الشحن */
+const shipOf = (c: Car) => Number(c.shipping_cost || 0);
+/* التكلفة الكاملة = قيمة السيارة الكلية + الشحن + التصليح */
+const costOf = (c: Car) => Number(c.purchase_price || 0) + shipOf(c) + sum(c.expenses);
+/* المتبقي = قيمة السيارة الكلية − المدفوع */
+const remainingOf = (c: Car) => Math.max(0, Number(c.purchase_price || 0) - Number(c.paid_amount || 0));
+const netOf = (c: Car) => Number(c.selling_price || 0) - costOf(c);
 
 const STATUS_ORDER: Status[] = ['available', 'shipping', 'repair', 'ready', 'sold'];
 
@@ -193,7 +201,7 @@ button{cursor:pointer}
 .cp .pipeLabel{font-size:12px;color:var(--muted)}
 
 /* البطاقات الإحصائية */
-.cp .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+.cp .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:18px}
 .cp .statCard{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;box-shadow:var(--shadow);overflow:hidden}
 .cp .statTop{display:flex;justify-content:space-between;align-items:center}
 .cp .statIcon{width:34px;height:34px;border-radius:9px;display:grid;place-items:center}
@@ -214,7 +222,7 @@ button{cursor:pointer}
 .cp .field label{display:block;font-size:12.5px;color:#4B5865;font-weight:500;margin-bottom:6px}
 .cp .field input,.cp .plainForm input,.cp .repairForm input,.cp .saleForm input,.cp .allocationForm input,.cp .allocationForm select{width:100%;height:42px;background:#F7F9FA;border:1px solid var(--border);color:var(--text);border-radius:9px;padding:0 12px;transition:border-color .15s,background .15s,box-shadow .15s}
 .cp .field input:hover,.cp .plainForm input:hover{border-color:#B9C4CD}
-.cp .field input:focus,.cp .plainForm input:focus,.cp .repairForm input:focus,.cp .saleForm input:focus,.cp .allocationForm input:focus,.cp .allocationForm select:focus,.cp .search:focus{border-color:var(--blue);background:#fff;outline:none;box-shadow:0 0 0 3px rgba(43,108,176,.12)}
+.cp .field input:focus,.cp .plainForm input:focus,.cp .repairForm input:focus,.cp .saleForm input:focus,.cp .allocationForm input:focus,.cp .allocationForm select:focus,.cp .moneyForm input:focus,.cp .search:focus{border-color:var(--blue);background:#fff;outline:none;box-shadow:0 0 0 3px rgba(43,108,176,.12)}
 .cp .addSubmit{width:100%;margin-top:18px;border:0;height:44px;border-radius:10px;background:var(--ink);color:#fff;font-weight:600;transition:background .15s}
 .cp .addSubmit:hover{background:var(--ink2)}
 .cp .listArea{min-width:0}
@@ -267,6 +275,12 @@ button{cursor:pointer}
 .cp .detailBox small{display:block;margin-top:6px;color:var(--muted);font-size:11.5px}
 .cp .detailBox form{display:flex;gap:6px}
 .cp .detailBox form input{height:38px}
+.cp .detailBox form.moneyForm{display:grid;gap:10px}
+.cp .moneyForm label{display:block;font-size:12.5px;color:#4B5865;font-weight:500}
+.cp .moneyForm input{width:100%;height:40px;margin-top:5px;background:#fff;border:1px solid var(--border);color:var(--text);border-radius:9px;padding:0 12px;transition:border-color .15s,box-shadow .15s}
+.cp .remainLine{display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:11px 14px;border-radius:10px;font-size:13px;background:var(--red-soft);color:var(--red);border:1px solid #F0CFCE}
+.cp .remainLine.paid{background:var(--green-soft);color:var(--green);border-color:#C9E5DA}
+.cp .remainLine b{font-size:16px}
 .cp .sectionTitle{margin:24px 0 11px;font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px}
 .cp .sectionTitle::after{content:'';flex:1;height:1px;background:var(--line)}
 .cp .carStatusBox{margin-top:16px;padding:16px;background:#F7F9FA;border:1px solid var(--line);border-radius:12px}
@@ -424,6 +438,8 @@ export default function CarProfitDashboard() {
   const [title, setTitle] = useState('');
   const [chassis, setChassis] = useState('');
   const [price, setPrice] = useState('');
+  const [paid, setPaid] = useState('');
+  const [shipping, setShipping] = useState('');
   const [arrivalDate, setArrivalDate] = useState('');
   const [trackingUrl, setTrackingUrl] = useState('');
   const [sel, setSel] = useState<Car | null>(null);
@@ -439,6 +455,8 @@ export default function CarProfitDashboard() {
   const [editExpenseTitle, setEditExpenseTitle] = useState('');
   const [editExpenseAmount, setEditExpenseAmount] = useState('');
   const [editPrice, setEditPrice] = useState('');
+  const [editPaid, setEditPaid] = useState('');
+  const [editShipping, setEditShipping] = useState('');
   const [goals, setGoals] = useState<Goal[]>([]);
   const [allocations, setAllocations] = useState<Allocation[]>([]);
   const [goalName, setGoalName] = useState('');
@@ -510,7 +528,9 @@ export default function CarProfitDashboard() {
 
   useEffect(() => {
     setEditPrice(sel ? String(sel.purchase_price) : '');
-  }, [sel?.id, sel?.purchase_price]);
+    setEditPaid(sel ? String(sel.paid_amount ?? 0) : '');
+    setEditShipping(sel ? String(sel.shipping_cost ?? 0) : '');
+  }, [sel?.id, sel?.purchase_price, sel?.paid_amount, sel?.shipping_cost]);
 
   useEffect(() => {
     if (!sel) return;
@@ -523,15 +543,21 @@ export default function CarProfitDashboard() {
 
   const addCar = async (e: FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !price) return say('أدخل اسم السيارة وسعر السيارة', true);
+    if (!title.trim() || !price) return say('أدخل اسم السيارة وقيمة السيارة', true);
     const parsedPrice = parseFloat(price);
-    if (Number.isNaN(parsedPrice) || parsedPrice <= 0) return say('أدخل سعر سيارة صحيح بالريال العُماني', true);
+    if (Number.isNaN(parsedPrice) || parsedPrice <= 0) return say('أدخل قيمة سيارة صحيحة بالريال العُماني', true);
+    const parsedPaid = paid ? parseFloat(paid) : 0;
+    const parsedShipping = shipping ? parseFloat(shipping) : 0;
+    if (Number.isNaN(parsedPaid) || parsedPaid < 0 || Number.isNaN(parsedShipping) || parsedShipping < 0) return say('أدخل قيم صحيحة للمدفوع والشحن', true);
+    if (parsedPaid > parsedPrice) return say('المبلغ المدفوع أكبر من قيمة السيارة', true);
 
     const { error } = await supabase.from('cars').insert([
       {
         title: title.trim(),
         chassis_number: chassis.trim(),
         purchase_price: parsedPrice,
+        paid_amount: parsedPaid,
+        shipping_cost: parsedShipping,
         status: 'available',
         arrival_date: arrivalDate || null,
         tracking_url: trackingUrl.trim() || null,
@@ -542,6 +568,8 @@ export default function CarProfitDashboard() {
     setTitle('');
     setChassis('');
     setPrice('');
+    setPaid('');
+    setShipping('');
     setArrivalDate('');
     setTrackingUrl('');
     await fetchCars();
@@ -566,14 +594,21 @@ export default function CarProfitDashboard() {
     say('تم حذف غرض التصليح');
   };
 
-  const updateCarPrice = async () => {
+  const updateCarMoney = async () => {
     if (!sel) return;
-    const amount = Number(editPrice);
-    if (!Number.isFinite(amount) || amount <= 0) return say('أدخل سعرًا صحيحًا أكبر من صفر', true);
-    const { error } = await supabase.from('cars').update({ purchase_price: amount }).eq('id', sel.id);
-    if (error) return say(`تعذر تعديل السعر: ${error.message}`, true);
+    const total = Number(editPrice);
+    const paidNow = Number(editPaid || 0);
+    const ship = Number(editShipping || 0);
+    if (!Number.isFinite(total) || total <= 0) return say('أدخل قيمة سيارة صحيحة أكبر من صفر', true);
+    if (!Number.isFinite(paidNow) || paidNow < 0 || !Number.isFinite(ship) || ship < 0) return say('أدخل قيم صحيحة للمدفوع والشحن', true);
+    if (paidNow > total) return say('المبلغ المدفوع أكبر من قيمة السيارة', true);
+    const { error } = await supabase
+      .from('cars')
+      .update({ purchase_price: total, paid_amount: paidNow, shipping_cost: ship })
+      .eq('id', sel.id);
+    if (error) return say(`تعذر حفظ القيم المالية: ${error.message}`, true);
     await fetchCars();
-    say('تم تعديل سعر شراء السيارة');
+    say('تم حفظ القيم المالية');
   };
 
   const saveCarShipping = async (car: Car, values: { arrival_date: string | null; tracking_url: string | null }) => {
@@ -671,7 +706,7 @@ export default function CarProfitDashboard() {
     const parsed = parseFloat(sellingPrice);
     if (Number.isNaN(parsed) || parsed <= 0) return say('أدخل سعر بيع صحيح', true);
 
-    const profit = parsed - Number(sel.purchase_price || 0) - sum(sel.expenses);
+    const profit = parsed - costOf(sel);
 
     const { error } = await supabase
       .from('cars')
@@ -708,12 +743,14 @@ export default function CarProfitDashboard() {
     const available = cars.filter((c) => c.status === 'available');
     const purchase = cars.reduce((t, c) => t + Number(c.purchase_price || 0), 0);
     const expenses = cars.reduce((t, c) => t + sum(c.expenses), 0);
+    const shippingTotal = cars.reduce((t, c) => t + shipOf(c), 0);
+    const remaining = cars.reduce((t, c) => t + remainingOf(c), 0);
     const sales = sold.reduce((t, c) => t + Number(c.selling_price || 0), 0);
-    const soldCost = sold.reduce((t, c) => t + Number(c.purchase_price || 0) + sum(c.expenses), 0);
+    const soldCost = sold.reduce((t, c) => t + costOf(c), 0);
     const profit = sales - soldCost;
-    const capital = purchase + expenses;
+    const capital = purchase + expenses + shippingTotal;
     const roi = soldCost > 0 ? ((profit / soldCost) * 100).toFixed(1) : '0.0';
-    return { sold, available, purchase, expenses, sales, profit, capital, roi };
+    return { sold, available, purchase, expenses, shippingTotal, remaining, sales, profit, capital, roi };
   }, [cars]);
 
   const heroProfit = useCountUp(Math.round(stats.profit));
@@ -734,7 +771,7 @@ export default function CarProfitDashboard() {
   const selStatus = sel ? statusOf(sel.status) : 'available';
   const selMeta = STATUS_META[selStatus];
   const selectedExpenses = sel ? sum(sel.expenses) : 0;
-  const selectedCost = sel ? Number(sel.purchase_price || 0) + selectedExpenses : 0;
+  const selectedCost = sel ? costOf(sel) : 0;
   const expectedProfit = sel && sellingPrice ? parseFloat(sellingPrice) - selectedCost : 0;
   const currentStatusIndex = sel ? STATUS_ORDER.indexOf(selStatus) : -1;
   const allocatedByGoal = goals.map((goal) => ({
@@ -766,7 +803,9 @@ export default function CarProfitDashboard() {
     ['إجمالي السيارات', 'blue', 'car', cars.length, 'جميع السيارات المسجلة بالنظام'],
     ['قيد المتابعة', 'orange', 'layers', cars.filter((c) => c.status !== 'sold').length, 'سيارات لم يتم بيعها بعد'],
     ['السيارات المباعة', 'green', 'sold', stats.sold.length, 'عمليات البيع المكتملة'],
-    ['إجمالي قيمة السيارات', 'gold', 'coins', fmt(stats.purchase), 'ريال عُماني — سعر السيارات فقط'],
+    ['إجمالي قيمة السيارات', 'gold', 'coins', fmt(stats.purchase), 'ريال عُماني — القيمة الكلية للسيارات'],
+    ['إجمالي المتبقي للدفع', 'orange', 'wallet', `${fmt(stats.remaining)} ر.ع`, 'المتبقي من قيمة السيارات'],
+    ['إجمالي الشحن', 'blue', 'ship', `${fmt(stats.shippingTotal)} ر.ع`, 'تكلفة شحن جميع السيارات'],
   ];
 
   const heroMinis: [string, string][] = [
@@ -778,7 +817,7 @@ export default function CarProfitDashboard() {
 
   const reportRows = stats.sold.map((car) => ({
     car,
-    cost: Number(car.purchase_price || 0) + sum(car.expenses),
+    cost: costOf(car),
     profit: netOf(car),
   }));
 
@@ -1011,15 +1050,16 @@ export default function CarProfitDashboard() {
               <div className="stats" style={{ marginTop: 16 }}>
                 {[
                   ['عدد السيارات', cars.length], ['المباعة', stats.sold.length], ['إجمالي المبيعات', `${fmt(stats.sales)} ر.ع`],
-                  ['إجمالي المصاريف', `${fmt(stats.expenses)} ر.ع`], ['صافي الربح المحقق', `${fmt(stats.profit)} ر.ع`], ['رأس المال المسجل', `${fmt(stats.capital)} ر.ع`],
+                  ['إجمالي المصاريف', `${fmt(stats.expenses)} ر.ع`], ['إجمالي الشحن', `${fmt(stats.shippingTotal)} ر.ع`], ['صافي الربح المحقق', `${fmt(stats.profit)} ر.ع`],
+                  ['رأس المال المسجل', `${fmt(stats.capital)} ر.ع`], ['إجمالي المتبقي للدفع', `${fmt(stats.remaining)} ر.ع`],
                 ].map(([label, value]) => <div className="statCard" key={String(label)} style={{ boxShadow: 'none' }}><div className="statLabel">{label}</div><div className="statValue num">{value}</div></div>)}
               </div>
               <h3 className="sectionTitle">تفاصيل السيارات المباعة</h3>
               {reportRows.length === 0 ? <div className="empty">لا توجد مبيعات مسجلة بعد.</div> : <div className="tableScroll"><div className="repairTable">
-                <div className="repairHeader" style={{ gridTemplateColumns: '1fr 110px 110px 110px' }}><span>السيارة</span><span>سعر الشراء</span><span>سعر البيع</span><span>صافي الربح</span></div>
+                <div className="repairHeader" style={{ gridTemplateColumns: '1fr 110px 110px 110px' }}><span>السيارة</span><span>قيمة السيارة</span><span>سعر البيع</span><span>صافي الربح</span></div>
                 {reportRows.map(({ car, cost, profit }) => (
                   <div className="repairRow num" key={car.id} style={{ gridTemplateColumns: '1fr 110px 110px 110px' }}>
-                    <span>{car.title}<small style={{ display: 'block', color: 'var(--muted)' }}>تكلفة شاملة {fmt(cost)} ر.ع</small></span>
+                    <span>{car.title}<small style={{ display: 'block', color: 'var(--muted)' }}>تكلفة شاملة (سيارة + شحن + تصليح) {fmt(cost)} ر.ع</small></span>
                     <span>{fmt(car.purchase_price)}</span>
                     <span>{fmt(car.selling_price)} ر.ع</span>
                     <b style={{ color: profit >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmt(profit)} ر.ع</b>
@@ -1042,7 +1082,7 @@ export default function CarProfitDashboard() {
                     <input id="f-vin" value={chassis} onChange={(e) => setChassis(e.target.value)} placeholder="VIN" style={{ direction: 'ltr', textAlign: 'right' }} />
                   </div>
                   <div className="field">
-                    <label htmlFor="f-price">سعر السيارة</label>
+                    <label htmlFor="f-price">قيمة السيارة الكلية</label>
                     <input
                       id="f-price"
                       type="number"
@@ -1054,6 +1094,19 @@ export default function CarProfitDashboard() {
                       placeholder="0.000 ر.ع"
                     />
                   </div>
+                  <div className="field">
+                    <label htmlFor="f-paid">قيمة الشراء (المدفوع)</label>
+                    <input id="f-paid" type="number" step="any" min="0" inputMode="decimal" value={paid} onChange={(e) => setPaid(e.target.value)} placeholder="0.000 ر.ع" />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="f-ship">قيمة الشحن</label>
+                    <input id="f-ship" type="number" step="any" min="0" inputMode="decimal" value={shipping} onChange={(e) => setShipping(e.target.value)} placeholder="0.000 ر.ع" />
+                  </div>
+                  {price && (
+                    <div className="expected num" style={{ marginTop: 14 }}>
+                      المتبقي: <b>{fmt(Math.max(0, Number(price) - Number(paid || 0)))} ر.ع</b>
+                    </div>
+                  )}
                   <div className="field"><label htmlFor="f-date">تاريخ الوصول (اختياري)</label><input id="f-date" type="date" value={arrivalDate} onChange={(e) => setArrivalDate(e.target.value)} /></div>
                   <div className="field"><label htmlFor="f-track">رابط تتبع الشحنة</label><input id="f-track" type="url" value={trackingUrl} onChange={(e) => setTrackingUrl(e.target.value)} placeholder="https://..." style={{ direction: 'ltr', textAlign: 'right' }} /></div>
                   <button className="addSubmit" type="submit">إضافة السيارة</button>
@@ -1135,8 +1188,11 @@ export default function CarProfitDashboard() {
                 ) : (
                   filteredCars.map((car) => {
                     const purchase = Number(car.purchase_price || 0);
-                    const expenses = sum(car.expenses);
+                    const repairs = sum(car.expenses);
+                    const shippingCost = shipOf(car);
+                    const expenses = repairs + shippingCost;
                     const cost = purchase + expenses;
+                    const left = remainingOf(car);
                     const revenue = Number(car.selling_price || 0);
                     const profit = revenue - cost;
                     const st = statusOf(car.status);
@@ -1155,13 +1211,17 @@ export default function CarProfitDashboard() {
                             </span>
                           </div>
                           <div className="vin">{car.chassis_number || 'رقم الشاصي غير مسجل'}</div>
+                          <div className="num" style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: left > 0 ? 'var(--red)' : 'var(--green)' }}>
+                            {left > 0 ? `متبقي ${fmt(left)} ر.ع` : 'مسدّدة'}
+                          </div>
                         </div>
 
                         <div className="barWrap">
                           <ProfitBar purchase={purchase} expenses={expenses} revenue={sold ? revenue : 0} />
                           <div className="barInfo num">
-                            <span>سعر السيارة {fmt(purchase)}</span>
-                            <span>التصليح {fmt(expenses)}</span>
+                            <span>قيمة السيارة {fmt(purchase)}</span>
+                            <span>الشحن {fmt(shippingCost)}</span>
+                            <span>التصليح {fmt(repairs)}</span>
                             <span>التكلفة {fmt(cost)}</span>
                           </div>
                         </div>
@@ -1221,13 +1281,31 @@ export default function CarProfitDashboard() {
 
             <div className="modalBody">
               <div className="detailGrid">
-                <div className="detailBox">
-                  <span>سعر السيارة</span>
-                  <form onSubmit={(e) => { e.preventDefault(); updateCarPrice(); }}>
-                    <input aria-label="سعر الشراء" type="number" min="0.001" step="0.001" value={editPrice} onChange={(e) => setEditPrice(e.target.value)} />
-                    <button className="secondaryBtn" type="submit" style={{ height: 38 }}>حفظ</button>
+                <div className="detailBox" style={{ gridColumn: '1 / -1' }}>
+                  <span>القيم المالية</span>
+                  <form className="moneyForm" onSubmit={(e) => { e.preventDefault(); updateCarMoney(); }}>
+                    <label>
+                      قيمة السيارة الكلية (ر.ع)
+                      <input type="number" min="0.001" step="0.001" value={editPrice} onChange={(e) => setEditPrice(e.target.value)} />
+                    </label>
+                    <label>
+                      قيمة الشراء — المدفوع (ر.ع)
+                      <input type="number" min="0" step="0.001" value={editPaid} onChange={(e) => setEditPaid(e.target.value)} />
+                    </label>
+                    <label>
+                      قيمة الشحن (ر.ع)
+                      <input type="number" min="0" step="0.001" value={editShipping} onChange={(e) => setEditShipping(e.target.value)} />
+                    </label>
+                    <button className="secondaryBtn" type="submit" style={{ height: 40, justifyContent: 'center' }}>حفظ القيم المالية</button>
                   </form>
-                  <small className="num">السعر الحالي: {fmt(sel.purchase_price)} ر.ع</small>
+                  <div className={`remainLine num ${remainingOf(sel) > 0 ? '' : 'paid'}`}>
+                    <span>المتبقي من قيمة السيارة</span>
+                    <b>{remainingOf(sel) > 0 ? `${fmt(remainingOf(sel))} ر.ع` : 'مسدّدة بالكامل'}</b>
+                  </div>
+                </div>
+                <div className="detailBox">
+                  <span>إجمالي الشحن</span>
+                  <b className="num" style={{ color: 'var(--blue)' }}>{fmt(shipOf(sel))} ر.ع</b>
                 </div>
                 <div className="detailBox">
                   <span>إجمالي التصليح</span>
@@ -1236,6 +1314,7 @@ export default function CarProfitDashboard() {
                 <div className="detailBox">
                   <span>إجمالي تكلفة السيارة</span>
                   <b className="num">{fmt(selectedCost)} ر.ع</b>
+                  <small>قيمة السيارة + الشحن + التصليح</small>
                 </div>
                 <div className="detailBox">
                   <span>حالة السيارة</span>
