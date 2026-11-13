@@ -760,12 +760,25 @@ export default function CarProfitDashboard() {
   const filteredCars = cars.filter((car) => {
     let matchesTab = true;
     if (activeSection === 'status') matchesTab = statusOf(car.status) === tab;
-    else if (activeSection === 'cars') matchesTab = tab === 'all' || car.status === tab;
+    else if (activeSection === 'cars') matchesTab = tab === 'all' || statusOf(car.status) === tab;
     const matchesSearch =
       !search ||
       (car.title || '').toLowerCase().includes(search) ||
       (car.chassis_number || '').toLowerCase().includes(search);
     return matchesTab && matchesSearch;
+  });
+  const statusPriority: Record<Status, number> = { repair: 0, shipping: 1, available: 2, ready: 3, sold: 4 };
+  const orderedCars = [...filteredCars].sort((a, b) => {
+    const statusA = statusOf(a.status);
+    const statusB = statusOf(b.status);
+    const priorityDifference = statusPriority[statusA] - statusPriority[statusB];
+    if (priorityDifference !== 0) return priorityDifference;
+    if (statusA === 'shipping' && statusB === 'shipping') {
+      const dateA = a.arrival_date ? new Date(a.arrival_date).getTime() : Number.POSITIVE_INFINITY;
+      const dateB = b.arrival_date ? new Date(b.arrival_date).getTime() : Number.POSITIVE_INFINITY;
+      if (dateA !== dateB) return dateA - dateB;
+    }
+    return 0;
   });
 
   const selStatus = sel ? statusOf(sel.status) : 'available';
@@ -1156,7 +1169,7 @@ export default function CarProfitDashboard() {
                       {(
                         [
                           ['all', 'الكل', cars.length],
-                          ['available', 'المتاحة', stats.available.length],
+                          ['shipping', 'في الشحن', cars.filter((c) => statusOf(c.status) === 'shipping').length],
                           ['sold', 'المباعة', stats.sold.length],
                         ] as [string, string, number][]
                       ).map(([key, label, count]) => (
@@ -1186,7 +1199,7 @@ export default function CarProfitDashboard() {
                     {cars.length ? 'لا توجد سيارة مطابقة للبحث.' : 'لا توجد سيارات مسجلة حتى الآن.'}
                   </div>
                 ) : (
-                  filteredCars.map((car) => {
+                  orderedCars.map((car) => {
                     const purchase = Number(car.purchase_price || 0);
                     const repairs = sum(car.expenses);
                     const shippingCost = shipOf(car);
@@ -1211,6 +1224,7 @@ export default function CarProfitDashboard() {
                             </span>
                           </div>
                           <div className="vin">{car.chassis_number || 'رقم الشاصي غير مسجل'}</div>
+                          {st === 'shipping' && <div className="num" style={{ marginTop: 6, fontSize: 11, color: 'var(--blue)' }}><Icon n="calendar" size={13} /> {car.arrival_date ? `الوصول المتوقع: ${new Date(`${car.arrival_date}T00:00:00`).toLocaleDateString('ar-OM')}` : 'موعد الوصول غير محدد'}</div>}
                           <div className="num" style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: left > 0 ? 'var(--red)' : 'var(--green)' }}>
                             {left > 0 ? `متبقي ${fmt(left)} ر.ع` : 'مسدّدة'}
                           </div>
